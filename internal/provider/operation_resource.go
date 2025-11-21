@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
 
 	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -37,6 +39,7 @@ var _ resource.ResourceWithUpgradeState = &OperationResource{}
 type operationResourceData struct {
 	ID        types.String `tfsdk:"id"`
 	Path      types.String `tfsdk:"path"`
+	BaseURL   types.String `tfsdk:"base_url"`
 	IdBuilder types.String `tfsdk:"id_builder"`
 	Method    types.String `tfsdk:"method"`
 
@@ -63,6 +66,8 @@ type operationResourceData struct {
 	UseSensitiveOutput types.Bool    `tfsdk:"use_sensitive_output"`
 	Output             types.Dynamic `tfsdk:"output"`
 	SensitiveOutput    types.Dynamic `tfsdk:"sensitive_output"`
+	// New field to allow security at resource level
+	Security           types.Object  `tfsdk:"security"`
 }
 
 func (r *OperationResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -87,6 +92,17 @@ func (r *OperationResource) Schema(ctx context.Context, req resource.SchemaReque
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"base_url": schema.StringAttribute{
+				Description:         "The base URL of the API for this operation. If defined, overrides the provider's base_url.",
+				MarkdownDescription: "The base URL of the API for this operation. If defined, overrides the provider's base_url.",
+				Optional:            true,
+				Validators: []validator.String{
+					myvalidator.StringIsParsable("HTTP url", func(s string) error {
+						_, err := url.Parse(s)
+						return err
+					}),
 				},
 			},
 			"path": schema.StringAttribute{
@@ -216,6 +232,263 @@ func (r *OperationResource) Schema(ctx context.Context, req resource.SchemaReque
 				Computed:            true,
 				Sensitive:           true,
 			},
+			"security": schema.SingleNestedAttribute{
+				Description:         "The OpenAPI security scheme that is used for auth. Only one of `http`, `apikey`, or `oauth2` can be specified. If defined here, it overrides the provider's security.",
+				MarkdownDescription: "The OpenAPI security scheme that is used for auth. Only one of `http`, `apikey`, or `oauth2` can be specified. If defined here, it overrides the provider's security.",
+				Optional:            true,
+				Sensitive:           true,
+				Attributes: map[string]schema.Attribute{
+					"http": schema.SingleNestedAttribute{
+						Description:         "Configuration for the HTTP authentication scheme. Exactly one of `basic` and `token` must be specified.",
+						MarkdownDescription: "Configuration for the HTTP authentication scheme. Exactly one of `basic` and `token` must be specified.",
+						Optional:            true,
+						Attributes: map[string]schema.Attribute{
+							"basic": schema.SingleNestedAttribute{
+								Description:         "Basic authentication",
+								MarkdownDescription: "Basic authentication",
+								Optional:            true,
+								Attributes: map[string]schema.Attribute{
+									"username": schema.StringAttribute{
+										Description:         "The username",
+										MarkdownDescription: "The username",
+										Required:            true,
+									},
+									"password": schema.StringAttribute{
+										Description:         "The password",
+										MarkdownDescription: "The password",
+										Required:            true,
+										Sensitive:           true,
+									},
+								},
+								Validators: []validator.Object{
+									objectvalidator.ExactlyOneOf(
+										path.MatchRoot("security").AtName("http").AtName("basic"),
+										path.MatchRoot("security").AtName("http").AtName("token"),
+									),
+								},
+							},
+							"token": schema.SingleNestedAttribute{
+								Description:         "Auth token (e.g. Bearer).",
+								MarkdownDescription: "Auth token (e.g. Bearer).",
+								Optional:            true,
+								Attributes: map[string]schema.Attribute{
+									"token": schema.StringAttribute{
+										Description:         "The value of the token.",
+										MarkdownDescription: "The value of the token.",
+										Required:            true,
+										Sensitive:           true,
+									},
+									"scheme": schema.StringAttribute{
+										Description:         "The auth scheme. Defaults to `Bearer`.",
+										MarkdownDescription: "The auth scheme. Defaults to `Bearer`.",
+										Optional:            true,
+									},
+								},
+								Validators: []validator.Object{
+									objectvalidator.ExactlyOneOf(
+										path.MatchRoot("security").AtName("http").AtName("basic"),
+										path.MatchRoot("security").AtName("http").AtName("token"),
+									),
+								},
+							},
+						},
+					},
+					"apikey": schema.SetNestedAttribute{
+						Description:         "Configuration for the API Key authentication scheme.",
+						MarkdownDescription: "Configuration for the API Key authentication scheme.",
+						Optional:            true,
+						NestedObject: schema.NestedAttributeObject{
+							Attributes: map[string]schema.Attribute{
+								"name": schema.StringAttribute{
+									Description:         "The API Key name",
+									MarkdownDescription: "The API Key name",
+									Required:            true,
+								},
+								"value": schema.StringAttribute{
+									Description:         "The API Key value",
+									MarkdownDescription: "The API Key value",
+									Required:            true,
+								},
+								"in": schema.StringAttribute{
+									Description:         "Specifies how the API Key is sent. Possible values are `query`, `header`, or `cookie`.",
+									MarkdownDescription: "Specifies how the API Key is sent. Possible values are `query`, `header`, or `cookie`.",
+									Required:            true,
+									Validators: []validator.String{
+										stringvalidator.OneOf("header", "query", "cookie"),
+									},
+								},
+							},
+						},
+					},
+					"oauth2": schema.SingleNestedAttribute{
+						Description:         "Configuration for the OAuth2 authentication scheme. Exactly one of `password`, `client_credentials` and `refresh_token` must be specified.",
+						MarkdownDescription: "Configuration for the OAuth2 authentication scheme. Exactly one of `password`, `client_credentials` and `refresh_token` must be specified.",
+						Optional:            true,
+						Attributes: map[string]schema.Attribute{
+							"password": schema.SingleNestedAttribute{
+								Description:         "Resource owner password credential.",
+								MarkdownDescription: "Resource owner password credential.",
+								Optional:            true,
+								Attributes: map[string]schema.Attribute{
+									"token_url": schema.StringAttribute{
+										Description:         "The token URL to be used for this flow.",
+										MarkdownDescription: "The token URL to be used for this flow.",
+										Required:            true,
+									},
+									"username": schema.StringAttribute{
+										Description:         "The username.",
+										MarkdownDescription: "The username.",
+										Required:            true,
+									},
+									"password": schema.StringAttribute{
+										Sensitive:           true,
+										Description:         "The password.",
+										MarkdownDescription: "The password.",
+										Required:            true,
+									},
+									"client_id": schema.StringAttribute{
+										Description:         "The application's ID.",
+										MarkdownDescription: "The application's ID.",
+										Optional:            true,
+									},
+									"client_secret": schema.StringAttribute{
+										Sensitive:           true,
+										Description:         "The application's secret.",
+										MarkdownDescription: "The application's secret.",
+										Optional:            true,
+									},
+									"scopes": schema.ListAttribute{
+										ElementType:         types.StringType,
+										Description:         "The optional requested permissions.",
+										MarkdownDescription: "The optional requested permissions.",
+										Optional:            true,
+									},
+									"in": schema.StringAttribute{
+										Description:         "Specifies how is the client ID & secret sent. Possible values are `params` e `header`. Se ausente, será auto detectado.",
+										MarkdownDescription: "Specifies how is the client ID & secret sent. Possible values are `params` e `header`. Se ausente, será auto detectado.",
+										Optional:            true,
+										Validators: []validator.String{stringvalidator.OneOf("params", "header")},
+									},
+									"endpoint_params": schema.MapAttribute{
+										ElementType:         types.ListType{ElemType: types.StringType},
+										Description:         "The additional parameters for requests to the token endpoint.",
+										MarkdownDescription: "The additional parameters for requests to the token endpoint.",
+										Optional:            true,
+									},
+								},
+								Validators: []validator.Object{
+									objectvalidator.ExactlyOneOf(
+										path.MatchRoot("security").AtName("oauth2").AtName("password"),
+										path.MatchRoot("security").AtName("oauth2").AtName("client_credentials"),
+										path.MatchRoot("security").AtName("oauth2").AtName("refresh_token"),
+									),
+								},
+							},
+							"client_credentials": schema.SingleNestedAttribute{
+								Description:         "Client credentials.",
+								MarkdownDescription: "Client credentials.",
+								Optional:            true,
+								Attributes: map[string]schema.Attribute{
+									"token_url": schema.StringAttribute{
+										Description:         "The token URL to be used for this flow.",
+										MarkdownDescription: "The token URL to be used for this flow.",
+										Required:            true,
+									},
+									"client_id": schema.StringAttribute{
+										Description:         "The application's ID.",
+										MarkdownDescription: "The application's ID.",
+										Required:            true,
+									},
+									"client_secret": schema.StringAttribute{
+										Sensitive:           true,
+										Description:         "The application's secret.",
+										MarkdownDescription: "The application's secret.",
+										Required:            true,
+									},
+									"scopes": schema.ListAttribute{
+										ElementType:         types.StringType,
+										Description:         "The optional requested permissions.",
+										MarkdownDescription: "The optional requested permissions.",
+										Optional:            true,
+									},
+									"in": schema.StringAttribute{
+										Description:         "Specifies how is the client ID & secret sent. Possible values are `params` e `header`. Se ausente, será auto detectado.",
+										MarkdownDescription: "Specifies how is the client ID & secret sent. Possible values are `params` e `header`. Se ausente, será auto detectado.",
+										Optional:            true,
+										Validators: []validator.String{stringvalidator.OneOf("params", "header")},
+									},
+									"endpoint_params": schema.MapAttribute{
+										ElementType:         types.ListType{ElemType: types.StringType},
+										Description:         "The additional parameters for requests to the token endpoint.",
+										MarkdownDescription: "The additional parameters for requests to the token endpoint.",
+										Optional:            true,
+									},
+								},
+								Validators: []validator.Object{
+									objectvalidator.ExactlyOneOf(
+										path.MatchRoot("security").AtName("oauth2").AtName("password"),
+										path.MatchRoot("security").AtName("oauth2").AtName("client_credentials"),
+										path.MatchRoot("security").AtName("oauth2").AtName("refresh_token"),
+									),
+								},
+							},
+							"refresh_token": schema.SingleNestedAttribute{
+								Description:         "Refresh token.",
+								MarkdownDescription: "Refresh token.",
+								Optional:            true,
+								Attributes: map[string]schema.Attribute{
+									"token_url": schema.StringAttribute{
+										Description:         "The token URL to be used for this flow.",
+										MarkdownDescription: "The token URL to be used for this flow.",
+										Required:            true,
+									},
+									"refresh_token": schema.StringAttribute{
+										Description:         "The refresh token.",
+										MarkdownDescription: "The refresh token.",
+										Sensitive:           true,
+										Required:            true,
+									},
+									"client_id": schema.StringAttribute{
+										Description:         "The application's ID.",
+										MarkdownDescription: "The application's ID.",
+										Optional:            true,
+									},
+									"client_secret": schema.StringAttribute{
+										Sensitive:           true,
+										Description:         "The application's secret.",
+										MarkdownDescription: "The application's secret.",
+										Optional:            true,
+									},
+									"scopes": schema.ListAttribute{
+										ElementType:         types.StringType,
+										Description:         "The optional requested permissions.",
+										MarkdownDescription: "The optional requested permissions.",
+										Optional:            true,
+									},
+									"in": schema.StringAttribute{
+										Description:         "Specifies how is the client ID & secret sent. Possible values are `params` e `header`. Se ausente, será auto detectado.",
+										MarkdownDescription: "Specifies how is the client ID & secret sent. Possible values are `params` e `header`. Se ausente, será auto detectado.",
+										Optional:            true,
+										Validators: []validator.String{stringvalidator.OneOf("params", "header")},
+									},
+									"token_type": schema.StringAttribute{
+										Description:         `The type of the access token. Defaults to "Bearer".`,
+										MarkdownDescription: `The type of the access token. Defaults to "Bearer".`,
+										Optional:            true,
+									},
+								},
+								Validators: []validator.Object{
+									objectvalidator.ExactlyOneOf(
+										path.MatchRoot("security").AtName("oauth2").AtName("password"),
+										path.MatchRoot("security").AtName("oauth2").AtName("client_credentials"),
+										path.MatchRoot("security").AtName("oauth2").AtName("refresh_token"),
+									),
+								},
+							},
+						},
+					},
+				},
+			},
 		},
 	}
 }
@@ -308,14 +581,71 @@ func (r *OperationResource) Configure(ctx context.Context, req resource.Configur
 }
 
 func (r *OperationResource) createOrUpdate(ctx context.Context, reqConfig tfsdk.Config, reqPlan tfsdk.Plan, reqState tfsdk.State, respPrivate ephemeral.PrivateData, respState *tfsdk.State, respDiags *diag.Diagnostics, forCreate bool) {
-	c := r.p.client
-	c.SetLoggerContext(ctx)
-
 	var plan operationResourceData
 	diags := reqPlan.Get(ctx, &plan)
 	respDiags.Append(diags...)
 	if respDiags.HasError() {
 		return
+	}
+
+	// Determine baseURL: resource overrides provider
+	baseURL := plan.BaseURL
+	if baseURL.IsNull() {
+		baseURL = r.p.config.BaseURL
+	}
+	if baseURL.IsNull() {
+		respDiags.AddError("base_url is required", "Either define base_url in the provider or in the operation.")
+		return
+	}
+
+	var c *client.Client
+	var err error
+	if !plan.BaseURL.IsNull() || (!plan.Security.IsNull() && !plan.Security.IsUnknown()) {
+		// Need to create a new client
+		clientOpt := &client.BuildOption{}
+		if r.p.client != nil {
+			// Copy TLS and other configs from provider client
+			clientOpt.CookieEnabled = r.p.client.Client.GetClient().Jar != nil
+			if transport, ok := r.p.client.Client.GetClient().Transport.(*http.Transport); ok {
+				clientOpt.TLSConfig = *transport.TLSClientConfig
+			}
+			// TODO: copy retry if needed
+		}
+		if !plan.Security.IsNull() && !plan.Security.IsUnknown() {
+			var security client.SecurityOption
+			security, diags = populateSecurity(ctx, plan.Security)
+			respDiags.Append(diags...)
+			if diags.HasError() {
+				return
+			}
+			clientOpt.Security = security
+		} else if r.p.client != nil {
+			clientOpt.Security = r.p.client.Security
+		}
+		c, err = client.New(ctx, baseURL.ValueString(), clientOpt)
+		if err != nil {
+			respDiags.AddError("Failed to create client", err.Error())
+			return
+		}
+	} else {
+		c = r.p.client
+	}
+	c.SetLoggerContext(ctx)
+
+	// If security is defined in the resource, create a temporary client with the resource's security
+	if !plan.Security.IsNull() && !plan.Security.IsUnknown() {
+		var security client.SecurityOption
+		security, diags = populateSecurity(ctx, plan.Security)
+		respDiags.Append(diags...)
+		if respDiags.HasError() {
+			return
+		}
+		tmpClient, err := client.NewWithOverridesFromExisting(c, c.BaseURL, security)
+		if err != nil {
+			respDiags.AddError("Failed to create client with resource security", err.Error())
+			return
+		}
+		c = tmpClient
 	}
 
 	var config operationResourceData
@@ -545,6 +875,38 @@ func (r *OperationResource) Delete(ctx context.Context, req resource.DeleteReque
 	resp.Diagnostics.Append(diags...)
 	if diags.HasError() {
 		return
+	}
+
+	// Determine the base URL to use: resource overrides provider
+	baseURL := r.p.apiOpt.BaseURL.String()
+	if !state.BaseURL.IsNull() && !state.BaseURL.IsUnknown() {
+		baseURL = state.BaseURL.ValueString()
+	}
+
+	// If base URL is overridden, create a temporary client with the new base URL
+	if baseURL != r.p.apiOpt.BaseURL.String() {
+		tmpClient, err := client.NewWithOverridesFromExisting(c, baseURL, c.Security)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to create client with resource base URL", err.Error())
+			return
+		}
+		c = tmpClient
+	}
+
+	// If security is defined in the resource, create a temporary client with the resource's security
+	if !state.Security.IsNull() && !state.Security.IsUnknown() {
+		var security client.SecurityOption
+		security, diags = populateSecurity(ctx, state.Security)
+		resp.Diagnostics.Append(diags...)
+		if diags.HasError() {
+			return
+		}
+		tmpClient, err := client.NewWithOverridesFromExisting(c, c.BaseURL, security)
+		if err != nil {
+			resp.Diagnostics.AddError("Failed to create client with resource security", err.Error())
+			return
+		}
+		c = tmpClient
 	}
 
 	output, err := dynamic.ToJSON(state.Output)

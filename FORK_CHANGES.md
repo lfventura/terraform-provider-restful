@@ -9,6 +9,61 @@ The changes in this fork have been submitted to the upstream repository:
 
 ## Additional Features
 
+### Resource-Level Configuration Overrides
+
+Added support for overriding provider-level configurations at the resource level:
+
+- **Optional `base_url` in Provider**: The `base_url` attribute in the provider is now optional. If not specified, it must be defined in each resource or operation.
+- **New Attribute: `base_url` in Resources**: Allows overriding the provider's `base_url` per resource or operation.
+- **Enhanced Security Overrides**: Improved support for overriding `security` configurations per resource, with better inheritance from the provider.
+
+### Usage Example
+
+```hcl
+# Provider with optional base_url
+provider "restful" {
+  # base_url is now optional
+  security = {
+    http = {
+      basic = {
+        username = "user"
+        password = "pass"
+      }
+    }
+  }
+}
+
+# Resource with base_url override
+resource "restful_resource" "api1" {
+  base_url = "https://api1.example.com"
+  path     = "/resource"
+  body     = { name = "test" }
+  security = {
+    apikey = [{
+      name  = "X-API-Key"
+      value = "api1-key"
+      in    = "header"
+    }]
+  }
+}
+
+# Operation with overrides
+resource "restful_operation" "op" {
+  base_url = "https://api2.example.com"
+  path     = "/operation"
+  method   = "POST"
+  security = {
+    oauth2 = {
+      client_credentials = {
+        token_url    = "https://api2.example.com/oauth/token"
+        client_id    = "client"
+        client_secret = "secret"
+      }
+    }
+  }
+}
+```
+
 ### Sensitive Output Support
 
 Added support for marking resource outputs as sensitive in Terraform:
@@ -56,4 +111,7 @@ terraform {
 
 ## Compatibility
 
-This fork maintains full compatibility with the upstream version. Existing configurations will continue to work without modifications.
+This fork introduces breaking changes:
+- `base_url` in the provider is now optional. Existing configurations that rely on provider-level `base_url` will continue to work, but new configurations must define `base_url` either in the provider or in each resource/operation.
+
+Existing configurations without `base_url` in the provider will require adding `base_url` to resources or the provider.

@@ -791,6 +791,41 @@ func TestResource_JSONServer_UseSensitiveOutput(t *testing.T) {
 	})
 }
 
+func TestResource_JSONServer_ResourceBaseURLOverride(t *testing.T) {
+	addr := "restful_resource.test"
+	d := newJsonServerData()
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { d.precheck(t) },
+		CheckDestroy:             d.CheckDestroy(addr),
+		ProtoV6ProviderFactories: acceptance.ProviderFactory(),
+		Steps: []resource.TestStep{
+			{
+				Config: d.resourceBaseURLOverride("foo"),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(addr, tfjsonpath.New("output").AtMapKey("id"), knownvalue.NotNull()),
+					statecheck.ExpectKnownValue(addr, tfjsonpath.New("output").AtMapKey("foo"), knownvalue.StringExact("foo")),
+				},
+			},
+			{
+				ResourceName:            addr,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"read_path", "base_url"},
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					return fmt.Sprintf(`{"id": %q, "path": "posts", "body": {"foo": null}}`, s.RootModule().Resources[addr].Primary.Attributes["id"]), nil
+				},
+			},
+			{
+				Config: d.resourceBaseURLOverride("bar"),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(addr, tfjsonpath.New("output").AtMapKey("id"), knownvalue.NotNull()),
+					statecheck.ExpectKnownValue(addr, tfjsonpath.New("output").AtMapKey("foo"), knownvalue.StringExact("bar")),
+				},
+			},
+		},
+	})
+}
+
 func (d jsonServerData) useSensitiveOutput(v string) string {
 	return fmt.Sprintf(`
 provider "restful" {
@@ -801,6 +836,23 @@ resource "restful_resource" "test" {
   path = "posts"
   read_path = "$(path)/$(body.id)"
   use_sensitive_output = true
+  body = {
+  	foo = %q
+  }
+}
+`, d.url, v)
+}
+
+func (d jsonServerData) resourceBaseURLOverride(v string) string {
+	return fmt.Sprintf(`
+provider "restful" {
+  # base_url not set at provider level
+}
+
+resource "restful_resource" "test" {
+  base_url = %q
+  path = "posts"
+  read_path = "$(path)/$(body.id)"
   body = {
   	foo = %q
   }

@@ -371,6 +371,24 @@ func TestOperation_JSONServer_UseSensitiveOutput(t *testing.T) {
 	})
 }
 
+func TestOperation_JSONServer_ResourceBaseURLOverride(t *testing.T) {
+	addr := "restful_operation.test"
+	d := newJsonServerOperation()
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { d.precheck(t) },
+		ProtoV6ProviderFactories: acceptance.ProviderFactory(),
+		Steps: []resource.TestStep{
+			{
+				Config: d.operationBaseURLOverride("foo"),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(addr, tfjsonpath.New("output").AtMapKey("id"), knownvalue.NotNull()),
+					statecheck.ExpectKnownValue(addr, tfjsonpath.New("output").AtMapKey("foo"), knownvalue.StringExact("foo")),
+				},
+			},
+		},
+	})
+}
+
 func (d jsonServerOperation) useSensitiveOutput(v string) string {
 	return fmt.Sprintf(`
 provider "restful" {
@@ -381,6 +399,23 @@ resource "restful_operation" "test" {
   path = "posts"
   method = "POST"
   use_sensitive_output = true
+  body = {
+  	foo = %q
+  }
+}
+`, d.url, v)
+}
+
+func (d jsonServerOperation) operationBaseURLOverride(v string) string {
+	return fmt.Sprintf(`
+provider "restful" {
+  # base_url not set at provider level
+}
+
+resource "restful_operation" "test" {
+  base_url = %q
+  path = "posts"
+  method = "POST"
   body = {
   	foo = %q
   }

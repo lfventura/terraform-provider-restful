@@ -1,54 +1,52 @@
-Para testar um provedor Terraform modificado localmente, você precisa compilá-lo e, em seguida, configurar o Terraform para usar essa compilação local em vez da versão do registro.
+To test a modified Terraform provider locally, you need to compile it and then configure Terraform to use this local build instead of the registry version.
 
-Aqui estão as etapas:
+Here are the steps:
 
-### 1. Compilar o Provedor
+### 1. Compile the Provider
 
-Primeiro, você precisa compilar o código do provedor para criar o binário executável. Use o seguinte comando, que levará em conta o caminho para o `go` que você me forneceu:
+First, you need to compile the provider code to create the executable binary. Use the following command, which takes into account the path to `go` that you provided:
 
 ```bash
 /opt/homebrew/bin/go build -o terraform-provider-restful
 ```
 
-Este comando irá gerar um arquivo binário chamado `terraform-provider-restful` no diretório atual.
+This command will generate a binary file called `terraform-provider-restful` in the current directory.
 
-### 2. Criar um Diretório de Desenvolvimento para o Provedor
+### 2. Create a Development Directory for the Provider
 
-O Terraform procura por binários de provedores em diretórios específicos. Para desenvolvimento, a maneira mais fácil é criar uma estrutura de diretórios e colocar o binário do provedor nela.
+Terraform looks for provider binaries in specific directories. For development, the easiest way is to create a directory structure and place the provider binary in it.
 
-Crie a seguinte estrutura de diretórios no seu diretório home:
-
-```bash
-mkdir -p ~/.terraform.d/plugins/registry.terraform.io/magodo/restful/1.1.0/darwin_amd64
-```
-
-**Nota:** `1.1.0` é um número de versão de exemplo. Você pode usar a versão atual do provedor ou qualquer número de versão válido. `darwin_amd64` é para macOS com CPU Intel. Se você estiver em uma arquitetura diferente (ex: Apple Silicon), use `darwin_arm64`.
-
-Agora, mova o binário que você compilou para este novo diretório:
+Create the following directory structure in your home directory:
 
 ```bash
-mv terraform-provider-restful ~/.terraform.d/plugins/registry.terraform.io/magodo/restful/1.1.0/darwin_amd64/
+mkdir -p ~/.terraform-plugins
 ```
 
-### 3. Configurar o Terraform para Usar o Provedor Local
+Now, move the binary you compiled to this new directory:
 
-Crie um arquivo de configuração para o Terraform em seu diretório home para instruí-lo a usar o provedor local. Crie o arquivo `~/.terraformrc` com o seguinte conteúdo:
+```bash
+mv terraform-provider-restful ~/.terraform-plugins
+```
+
+### 3. Configure Terraform to Use the Local Provider
+
+Create a configuration file for Terraform in your home directory to instruct it to use the local provider. Create the file `~/.terraformrc` with the following content:
 
 ```
 provider_installation {
   dev_overrides {
-    "magodo/restful" = "~/.terraform.d/plugins/registry.terraform.io/magodo/restful"
+    "lfventura/restful" = "/Users/user/terraform-plugins"
   }
 }
 ```
 
-### 4. Testar o Provedor e Ver os Logs
+### 4. Test the Provider and View the Logs
 
-Agora você pode ir para qualquer um dos diretórios de exemplo no projeto (como `examples/resources/restful_resource`) e executar os comandos do Terraform.
+Now you can go to any of the example directories in the project (like `examples/resources/restful_resource`) and run the Terraform commands.
 
-Para ver os logs do provedor, você precisa definir a variável de ambiente `TF_LOG_PROVIDER`.
+To see the provider logs, you need to set the `TF_LOG_PROVIDER` environment variable.
 
-Execute os seguintes comandos:
+Run the following commands:
 
 ```bash
 export TF_LOG_PROVIDER=INFO
@@ -56,10 +54,12 @@ terraform init
 terraform plan
 ```
 
-Ao executar `terraform plan`, você deverá ver uma mensagem de log com o tipo da variável `output`. Procure por uma linha semelhante a esta:
+The init might fail, but proceed with plan.
+
+When running `terraform plan`, you should see a log message with the type of the `output` variable. Look for a line similar to this:
 
 ```
 [INFO] output type: basetypes.DynamicValue
 ```
 
-Por favor, execute esses passos e me diga qual é o tipo da variável `output`. Depois disso, eu poderei corrigir o código.
+Please execute these steps and tell me what the type of the `output` variable is. After that, I will be able to fix the code.
