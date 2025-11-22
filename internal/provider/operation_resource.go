@@ -867,9 +867,6 @@ func (r *OperationResource) Read(ctx context.Context, req resource.ReadRequest, 
 }
 
 func (r *OperationResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	c := r.p.client
-	c.SetLoggerContext(ctx)
-
 	var state operationResourceData
 	diags := req.State.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
@@ -883,31 +880,30 @@ func (r *OperationResource) Delete(ctx context.Context, req resource.DeleteReque
 		baseURL = state.BaseURL.ValueString()
 	}
 
-	// If base URL is overridden, create a temporary client with the new base URL
-	if baseURL != r.p.apiOpt.BaseURL.String() {
-		tmpClient, err := client.NewWithOverridesFromExisting(c, baseURL, c.Security)
-		if err != nil {
-			resp.Diagnostics.AddError("Failed to create client with resource base URL", err.Error())
-			return
-		}
-		c = tmpClient
+	if baseURL == "" {
+		resp.Diagnostics.AddError("base_url is required", "base_url must be provided either in the provider or in the resource")
+		return
 	}
 
-	// If security is defined in the resource, create a temporary client with the resource's security
+	// Determine security
+	security := r.p.buildOpt.Security
 	if !state.Security.IsNull() && !state.Security.IsUnknown() {
-		var security client.SecurityOption
 		security, diags = populateSecurity(ctx, state.Security)
 		resp.Diagnostics.Append(diags...)
 		if diags.HasError() {
 			return
 		}
-		tmpClient, err := client.NewWithOverridesFromExisting(c, c.BaseURL, security)
-		if err != nil {
-			resp.Diagnostics.AddError("Failed to create client with resource security", err.Error())
-			return
-		}
-		c = tmpClient
 	}
+
+	// Create client
+	buildOpt := r.p.buildOpt
+	buildOpt.Security = security
+	c, err := client.New(ctx, baseURL, &buildOpt)
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to create client", err.Error())
+		return
+	}
+	c.SetLoggerContext(ctx)
 
 	output, err := dynamic.ToJSON(state.Output)
 	if err != nil {
