@@ -33,10 +33,11 @@ import (
 var _ provider.Provider = &Provider{}
 
 type Provider struct {
-	client *client.Client
-	apiOpt apiOption
-	config providerConfig
-	once   sync.Once
+	client  *client.Client
+	apiOpt  apiOption
+	buildOpt client.BuildOption
+	config  providerConfig
+	once    sync.Once
 }
 
 type providerData struct {
@@ -706,6 +707,8 @@ func (p *Provider) Init(ctx context.Context, config providerConfig) diag.Diagnos
 			}
 			clientOpt.Security = security
 		}
+
+		p.buildOpt = *clientOpt
 
 		var (
 			diags diag.Diagnostics
